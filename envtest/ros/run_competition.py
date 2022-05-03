@@ -15,6 +15,7 @@ from user_code import compute_command_vision_based, compute_command_state_based
 from utils import AgileCommandMode, AgileQuadState
 
 
+
 class AgilePilotNode:
     def __init__(self, vision_based=False, ppo_path=None):
         print("Initializing agile_pilot_node...")
@@ -38,6 +39,8 @@ class AgilePilotNode:
 
         self.img_sub = rospy.Subscriber("/" + quad_name + "/dodgeros_pilot/unity/depth", Image, self.img_callback,
                                         queue_size=1, tcp_nodelay=True)
+        self.vis_sub = rospy.Subscriber("/" + quad_name + "/dodgeros_pilot/unity/image", Image, self.vis_callback,
+                                        queue_size=1, tcp_nodelay=True) # added by Sheng for extracting mono image
         self.obstacle_sub = rospy.Subscriber("/" + quad_name + "/dodgeros_pilot/groundtruth/obstacles", ObstacleArray,
                                              self.obstacle_callback, queue_size=1, tcp_nodelay=True)
 
@@ -56,6 +59,11 @@ class AgilePilotNode:
         command = compute_command_vision_based(self.state, cv_image)
         self.publish_command(command)
 
+    def vis_callback(self, img_data):
+        self.vision = img_data
+        cv_image = self.cv_bridge.imgmsg_to_cv2(img_data, desired_encoding='passthrough')
+        self.vision = cv_image
+
     def state_callback(self, state_data):
         self.state = AgileQuadState(state_data)
 
@@ -67,7 +75,7 @@ class AgilePilotNode:
         rl_policy = None
         if self.ppo_path is not None:
             rl_policy = load_rl_policy(self.ppo_path)
-        command = compute_command_state_based(state=self.state, obstacles=obs_data, rl_policy=rl_policy)
+        command = compute_command_state_based(state=self.state, obstacles=obs_data, vision = self.vision, start = self.publish_commands, rl_policy=rl_policy)
         self.publish_command(command)
 
     def publish_command(self, command):
