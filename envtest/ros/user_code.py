@@ -13,6 +13,7 @@ import rospy # for determining the current time
 import matplotlib.pyplot as plt # for visualizing data in real time
 import math
 from csv import writer
+from datetime import datetime
 
 initTime = None
 
@@ -76,10 +77,12 @@ def compute_command_state_based(state, obstacles, vision, start, rl_policy=None)
     currentTime = -1 # initialize
     now = rospy.get_rostime()
     global initTime
+    global date_string # placeholder
     # breakpoint()
     if start: # only start to counting time if we receive the start command
         if initTime is None:
             initTime = now.secs + now.nsecs/1000000000.0
+            date_string = f'{datetime.now():%Y-%m-%d %H:%M:%S%z}'
         else:
             currentTime = now.secs + now.nsecs/1000000000.0 - initTime
             print("current time is", currentTime)
@@ -110,32 +113,32 @@ def compute_command_state_based(state, obstacles, vision, start, rl_policy=None)
             # targetPos.x = radius * sinf(currentRate * netTime)
             # targetPos.y = radius * (1 - cosf(currentRate * netTime))
             # targetPos.z = 1
-            targetPos = np.array([2*(1-math.cos(currentTime)), 2*math.sin(currentTime), 1.0 + math.sin(currentTime)])
-            
+            # targetPos = np.array([2*(1-math.cos(currentTime)), 2*math.sin(currentTime), 1.0 + math.sin(currentTime)])
+            targetPos = np.array([1*currentTime,0.0,1.0])
 
             # targetVel.x = radius * currentRate * cosf(currentRate * netTime)
             # targetVel.y = radius * currentRate * sinf(currentRate * netTime)
             # targetVel.z = 0
-            targetVel = np.array([2*math.sin(currentTime), 2*math.cos(currentTime), math.cos(currentTime)])
-            
+            # targetVel = np.array([2*math.sin(currentTime), 2*math.cos(currentTime), math.cos(currentTime)])
+            targetVel = np.array([1.0,0.0,0.0])
     
             # targetAcc.x = -radius * currentRate * currentRate * sinf(currentRate * netTime)
             # targetAcc.y = radius * currentRate * currentRate * cosf(currentRate * netTime)
             # targetAcc.z = 0
-            targetAcc = np.array([2*math.cos(currentTime), -2*math.sin(currentTime), -math.sin(currentTime)])
-            
+            # targetAcc = np.array([2*math.cos(currentTime), -2*math.sin(currentTime), -math.sin(currentTime)])
+            targetAcc = np.array([0.0,0.0,0.0])
     
             # targetJerk.x = -radius * powF(currentRate,3) * cosf(currentRate * netTime)
             # targetJerk.y = -radius * powF(currentRate,3) * sinf(currentRate * netTime)
             # targetJerk.z = 0
-            targetJerk = np.array([-2*math.sin(currentTime), -2*math.cos(currentTime), -math.cos(currentTime)])
-            
+            # targetJerk = np.array([-2*math.sin(currentTime), -2*math.cos(currentTime), -math.cos(currentTime)])
+            targetJerk = np.array([0.0,0.0,0.0])
     
             # targetSnap.x = radius * powF(currentRate,4) * sinf(currentRate * netTime)
             # targetSnap.y = -radius * powF(currentRate,4) * cosf(currentRate * netTime)
             # targetSnap.z = 0
-            targetSnap = np.array([-2*math.cos(currentTime), 2*math.sin(currentTime), math.sin(currentTime)])
-            
+            # targetSnap = np.array([-2*math.cos(currentTime), 2*math.sin(currentTime), math.sin(currentTime)])
+            targetSnap = np.array([0.0,0.0,0.0])
     
             zeros2 = [0.0,0.0]
             targetYaw = np.array([1.0,0.0])
@@ -346,7 +349,7 @@ def compute_command_state_based(state, obstacles, vision, start, rl_policy=None)
             rdes = Rot.from_matrix(Rdes)
             logging_Rdes = rdes.as_euler('zyx',degrees=True)
     
-            with open('test.csv', 'a', newline='') as f_object:  
+            with open(date_string+'.csv', 'a', newline='') as f_object:  
                 writer_obj = writer(f_object)
                 writer_obj.writerow([state.t, 
                                     statePos[0],
