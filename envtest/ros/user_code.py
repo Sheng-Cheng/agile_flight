@@ -93,17 +93,17 @@ def compute_command_state_based(state, obstacles, vision, start, rl_policy=None)
             J = np.array([[0.0025, 0, 0],
                           [0, 0.0021, 0],
                           [0, 0, 0.0043]])
-            GeoCtrl_Kpx = 4.5 # 4.512 
-            GeoCtrl_Kpy = 5.0 #4.512   
-            GeoCtrl_Kpz = 5 
-            GeoCtrl_Kvx = 0.5 
-            GeoCtrl_Kvy = 0.6 # 0.5
-            GeoCtrl_Kvz = 1.504
+            GeoCtrl_Kpx = 10.0 # 4.512 
+            GeoCtrl_Kpy = 10.0 #4.512   
+            GeoCtrl_Kpz = 10.0 
+            GeoCtrl_Kvx = 2.5 
+            GeoCtrl_Kvy = 2.5 # 0.5
+            GeoCtrl_Kvz = 4.5
             GeoCtrl_KRx = 0.128
             GeoCtrl_KRy = 0.086
             GeoCtrl_KRz = 0.02
-            GeoCtrl_KOx = 0.07327586207
-            GeoCtrl_KOy = 0.05 # 0.073
+            GeoCtrl_KOx = 0.03
+            GeoCtrl_KOy = 0.03 # 0.073
             GeoCtrl_KOz = 0.004
 
             GRAVITY_MAGNITUDE = 9.8
