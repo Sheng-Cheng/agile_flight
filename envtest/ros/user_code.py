@@ -78,21 +78,54 @@ def compute_command_state_based(state, obstacles, vision, start, rl_policy=None)
     now = rospy.get_rostime()
     global initTime
     global date_string # placeholder
+
+    # storage for L1 related variables
+    global v_hat_prev # storage of state predictor value of translational speed
+    global omega_hat_prev # storage of state predictor value of rotational speed  
+    global v_prev # storage of previous vehicle translational speed
+    global omega_prev # storage of previous vehicle rotational speed
+    global R_prev # storage of previous rotational matrix
+    global u_b_prev # storage of previous baseline control action
+    global u_ad_prev # storage of previous L1 control action
+    global sigma_m_hat_prev # storage of previous sigma_m_hat
+    global sigma_um_hat_prev # storage of previous sigma_um_hat
+    global lpf1_prev # storage of lpf1 outputs
+    global lpf2_prev # storage of lpf2 outputs
+
     # breakpoint()
     if start: # only start to counting time if we receive the start command
         if initTime is None:
             initTime = now.secs + now.nsecs/1000000000.0
             date_string = f'{datetime.now():%Y-%m-%d %H:%M:%S%z}'
+            # initialize L1 needed variables
+            v_hat_prev = state.vel
+            omega_hat_prev = state.omega
+            v_prev = np.array([0.0,0.0,0.0])
+            omega_prev = np.array([0.0,0.0,0.0])
+    
+            # initialize previous rotational matrix
+            qq = state.att
+            # transforming the quaternion q to rotation matrix R
+            r = Rot.from_quat([qq[1],qq[2],qq[3],qq[0]]) # python's quaternion makes the scalar term the last one
+            R_prev = r.as_matrix()
+            
+            u_b_prev = np.array([0.0,0.0,0.0,0.0])
+            u_ad_prev = np.array([0.0,0.0,0.0,0.0])
+            sigma_m_hat_prev = np.array([0.0,0.0,0.0,0.0])
+            sigma_um_hat_prev = np.array([0.0,0.0])
+            lpf1_prev = np.array([0.0,0.0,0.0,0.0])
+            lpf2_prev = np.array([0.0,0.0,0.0,0.0])
         else:
             currentTime = now.secs + now.nsecs/1000000000.0 - initTime
             print("current time is", currentTime)
 
             # begin trajectory computation 
             # parameters
-            kg_vehicleMass = 0.752
+            kg_vehicleMass = 0.752 * 1.5 # add small perturbation to the mass
             J = np.array([[0.0025, 0, 0],
                           [0, 0.0021, 0],
                           [0, 0, 0.0043]])
+            Jinv = np.linalg.inv(J)
             GeoCtrl_Kpx = 10.0 # 4.512 
             GeoCtrl_Kpy = 10.0 #4.512   
             GeoCtrl_Kpz = 10.0 
@@ -107,6 +140,13 @@ def compute_command_state_based(state, obstacles, vision, start, rl_policy=None)
             GeoCtrl_KOz = 0.004
 
             GRAVITY_MAGNITUDE = 9.8
+
+            l1enable = 0 # if 0, then L1 is disabled
+            As_v = -5.0 # parameter for L1
+            As_omega = -5.0 # parameter for L1
+            ctoffq1Thrust = 5 # cutoff frequency for thrust channel LPF (rad/s)
+            ctoffq1Moment = 1 # cutoff frequency for moment channels LPF1 (rad/s)
+            ctoffq2Moment = 1 # cutoff frequency for moment channels LPF2 (rad/s)
 
             zeros3 = [0.0,0.0,0.0]
 
@@ -338,17 +378,139 @@ def compute_command_state_based(state, obstacles, vision, start, rl_policy=None)
             thrustMomentCmd[2] = M[1]
             thrustMomentCmd[3] = M[2]
     
+
+            # == begin L1 adaptive control ==
+            # first do the state predictor
+
+            e3 = np.array([0.0, 0.0, 1.0])
+            dt = 0.01
+
+
+            # load translational velocity
+            v_now = state.vel
+    
+
+            # load rotational velocity
+            omega_now = state.omega
+
+            massInverse = 1.0 / kg_vehicleMass
+
+            # compute prediction error (on previous step)
+            vpred_error_prev = v_hat_prev - v_prev
+            omegapred_error_prev = omega_hat_prev - omega_prev
+
+            # NOTE: per the definition in vector3.h, vector * scalaer must have vector first then multiply the scalar later
+            # original form:
+            v_hat = v_hat_prev + (-e3 * GRAVITY_MAGNITUDE + R_prev[:,2]* (u_b_prev[0] + u_ad_prev[0] + sigma_m_hat_prev[0]) * massInverse + R_prev[:,0] * sigma_um_hat_prev[0] * massInverse + R_prev[:,1] * sigma_um_hat_prev[1] * massInverse + vpred_error_prev * As_v) * dt
+            # turn e3 * GRAVITY_MAGNITUDE to -e3 * GRAVITY_MAGNITUDE
+            # turn - R_prev[:,2]* (u_b_prev[0] + u_ad_prev[0] + sigma_m_hat_prev[0]) to + R_prev[:,2]* (u_b_prev[0] + u_ad_prev[0] + sigma_m_hat_prev[0])
+            # breakpoint()
+            # Jinv is the inverse of inertia J
+
+            # temp vector: thrustMomentCmd[1--3] + u_ad_prev[1--3] + sigma_m_hat_prev[1--3]
+            # original form
+            tempVec = np.array([u_b_prev[1] + u_ad_prev[1] + sigma_m_hat_prev[1], u_b_prev[2] + u_ad_prev[2] + sigma_m_hat_prev[2], u_b_prev[3] + u_ad_prev[3] + sigma_m_hat_prev[3]])
+            omega_hat = omega_hat_prev + (-np.matmul(Jinv, np.cross(omega_prev, (np.matmul(J, omega_prev)))) + np.matmul(Jinv, tempVec) + omegapred_error_prev * As_omega) * dt
+
+            # update the state prediction storage
+            v_hat_prev = v_hat
+            omega_hat_prev = omega_hat
+
+            # compute prediction error (for this step)
+            vpred_error = v_hat - v_now
+            omegapred_error = omega_hat - omega_now
+
+            # exponential coefficients coefficient for As
+            exp_As_v_dt = math.exp(As_v * dt)
+            exp_As_omega_dt = math.exp(As_omega * dt)
+
+            # later part of uncertainty estimation (piecewise constant)
+            PhiInvmu_v = vpred_error / (exp_As_v_dt - 1) * As_v * exp_As_v_dt
+            PhiInvmu_omega = omegapred_error / (exp_As_omega_dt - 1) * As_omega * exp_As_omega_dt
+
+            sigma_m_hat = np.array([0.0,0.0,0.0,0.0]) # estimated matched uncertainty
+            sigma_m_hat_2to4 = np.array([0.0,0.0,0.0]) # second to fourth element of the estimated matched uncertainty
+            sigma_um_hat = np.array([0.0,0.0]) # estimated unmatched uncertainty
+
+            # use the rotation matrix in the current step
+            qq = state.att
+            # transforming the quaternion q to rotation matrix R
+            r = Rot.from_quat([qq[1],qq[2],qq[3],qq[0]]) # python's quaternion makes the scalar term the last one
+            R = r.as_matrix()
+
+
+            sigma_m_hat[0] = - np.dot(R[:,2], PhiInvmu_v) * kg_vehicleMass
+            # turn np.dot(R[:,2], PhiInvmu_v) * kg_vehicleMass to -np.dot(R[:,2], PhiInvmu_v) * kg_vehicleMass
+            sigma_m_hat_2to4 = -np.matmul(J, PhiInvmu_omega)
+            sigma_m_hat[1] = sigma_m_hat_2to4[0]
+            sigma_m_hat[2] = sigma_m_hat_2to4[1]
+            sigma_m_hat[3] = sigma_m_hat_2to4[2]
+
+            sigma_um_hat[0] = -np.dot(R[:,0], PhiInvmu_v) * kg_vehicleMass
+            sigma_um_hat[1] = -np.dot(R[:,1], PhiInvmu_v) * kg_vehicleMass
+
+            # store uncertainty estimations
+            sigma_m_hat_prev = sigma_m_hat
+            sigma_um_hat_prev = sigma_um_hat
+
+            # compute lpf1 coefficients
+            lpf1_coefficientThrust1 = math.exp(- ctoffq1Thrust * dt)
+            lpf1_coefficientThrust2 = 1.0 - lpf1_coefficientThrust1
+
+            lpf1_coefficientMoment1 = math.exp(- ctoffq1Moment * dt)
+            lpf1_coefficientMoment2 = 1.0 - lpf1_coefficientMoment1
+
+            # update the adaptive control
+            u_ad_int = np.array([0.0,0.0,0.0,0.0])
+            u_ad = np.array([0.0,0.0,0.0,0.0])
+
+            # low-pass filter 1 (negation is added to u_ad_prev to filter the correct signal)
+            u_ad_int[0] = lpf1_coefficientThrust1 * (lpf1_prev[0]) + lpf1_coefficientThrust2 * sigma_m_hat[0]
+            u_ad_int[1:3] = lpf1_coefficientMoment1 * (lpf1_prev[1:3]) + lpf1_coefficientMoment2 * sigma_m_hat[1:3]
+            # u_ad_int[2] = lpf1_coefficientMoment1 * (lpf1_prev[2]) + lpf1_coefficientMoment2 * sigma_m_hat[2];
+            # u_ad_int[3] = lpf1_coefficientMoment1 * (lpf1_prev[3]) + lpf1_coefficientMoment2 * sigma_m_hat[3];
+
+            lpf1_prev = u_ad_int; # store the current state
+
+            # coefficients for the second LPF on the moment channel
+            lpf2_coefficientMoment1 = math.exp(- ctoffq2Moment * dt)
+            lpf2_coefficientMoment2 = 1.0 - lpf2_coefficientMoment1
+
+            # low-pass filter 2 (optional)
+            u_ad[0] = u_ad_int[0] # only one filter on the thrust channel
+            u_ad[1:3] = lpf2_coefficientMoment1 * lpf2_prev[1:3] + lpf2_coefficientMoment2 * u_ad_int[1:3]
+            # u_ad[2] = lpf2_coefficientMoment1 * lpf2_prev[2] + lpf2_coefficientMoment2 * u_ad_int[2];
+            # u_ad[3] = lpf2_coefficientMoment1 * lpf2_prev[3] + lpf2_coefficientMoment2 * u_ad_int[3];
+
+            lpf2_prev = u_ad # store the current state
+    
+            u_ad = -u_ad
+
+            # store the values for next iteration
+            u_ad_prev = u_ad * l1enable
+
+            v_prev = v_now
+            omega_prev = omega_now
+            R_prev = R
+            u_b_prev = thrustMomentCmd
+
+            # == end L1 adaptive control ==
+
+            # compute motor command
             individualMotorCmd = np.array([0.0,0.0,0.0,0.0])
             motorAssignMatrix = np.array([[1, 1, 1, 1],
                                       [-0.1, 0.1,-0.1, 0.1],
                                       [-0.075, 0.075, 0.075, -0.075],
                                       [-0.022, -0.022, 0.022, 0.022]])
-            individualMotorCmd = np.matmul(np.linalg.inv(motorAssignMatrix),thrustMomentCmd)
-            
+            individualMotorCmd = np.matmul(np.linalg.inv(motorAssignMatrix),thrustMomentCmd + u_ad_prev)
+             
+
+
+            # == logging ==
             logging_R = r.as_euler('zyx',degrees=True)
             rdes = Rot.from_matrix(Rdes)
             logging_Rdes = rdes.as_euler('zyx',degrees=True)
-    
+
             with open(date_string+'.csv', 'a', newline='') as f_object:  
                 writer_obj = writer(f_object)
                 writer_obj.writerow([state.t, 
@@ -375,8 +537,25 @@ def compute_command_state_based(state, obstacles, vision, start, rl_policy=None)
                                     Omega[2],
                                     Omegad[0],
                                     Omegad[1],
-                                    Omegad[2]])
+                                    Omegad[2],
+                                    v_hat_prev[0],
+                                    v_hat_prev[1],
+                                    v_hat_prev[2],
+                                    omega_hat_prev[0],
+                                    omega_hat_prev[1],
+                                    omega_hat_prev[2],
+                                    sigma_m_hat[0],
+                                    sigma_m_hat[1],
+                                    sigma_m_hat[2],
+                                    sigma_m_hat[3],
+                                    sigma_um_hat[0],
+                                    sigma_um_hat[1],
+                                    u_ad[0],
+                                    u_ad[1],
+                                    u_ad[2],
+                                    u_ad[3]])
             f_object.close()
+
             # Example of SRT command
             command_mode = 0
             command = AgileCommand(command_mode)
