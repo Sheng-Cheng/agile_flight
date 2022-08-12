@@ -297,7 +297,9 @@ def compute_command_state_based(state, obstacles, vision, start, rl_policy=None)
     
             Rd_dot = np.empty(shape=(3,3)) # derivative of Rdes
             Rd_ddot = np.empty(shape=(3,3)) # derivative of Rd_dot
-    
+            
+            This code has bugs. The commented lines 306 and 311 should be recovered. Also the lines 317-318 should disappear
+            
             Rd_dot[0,:] = b1c_dot
             Rd_dot[1,:] = b2c_dot
             Rd_dot[2,:] = b3c_dot
