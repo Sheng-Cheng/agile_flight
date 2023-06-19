@@ -344,19 +344,19 @@ def compute_command_state_based(state, obstacles, vision, start, rl_policy=None)
             Rd_dot[0,:] = b1c_dot
             Rd_dot[1,:] = b2c_dot
             Rd_dot[2,:] = b3c_dot
-            # Rd_dot.transpose();
+            Rd_dot = Rd_dot.transpose();
     
             Rd_ddot[0,:] = b1c_ddot
             Rd_ddot[1,:] = b2c_ddot
             Rd_ddot[2,:] = b3c_ddot
-            # Rd_ddot.transpose();
+            Rd_ddot = Rd_ddot.transpose();
     
             Omegad = veeOperator(np.matmul(Rdes.transpose(), Rd_dot))
             Omegad_dot = veeOperator(np.matmul(Rdes.transpose(), Rd_ddot) - np.matmul(hatOperator(Omegad), hatOperator(Omegad)))
             
             # these two lines are remedy which is not supposed to exist in the code. There might be an error in the code above.
-            Omegad[1] = -Omegad[1]
-            Omegad_dot[1] = -Omegad_dot[1]
+            # Omegad[1] = -Omegad[1]
+            # Omegad_dot[1] = -Omegad_dot[1]
 
             # temporarily use zero Omegad
             ew = Omega -  np.matmul(np.matmul(R.transpose(), Rdes), Omegad)
